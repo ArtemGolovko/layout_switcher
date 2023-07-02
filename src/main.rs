@@ -1,77 +1,85 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![windows_subsystem = "windows"]
 
-use widestring::{U16CStr, U16CString};
+use core::ptr::{null, null_mut};
+use widestring::widecstr;
+use winapi::*;
 
-type c_int = i32;
-type c_uint = u32;
-type UINT = c_uint;
-type INT = c_int;
-type c_long = i64;
-type LONG = c_long;
-type HKL = HANDLE;
-type HANDLE = PVOID;
-type WCHAR = wchar_t;
-type wchar_t = u16;
-type PVOID = *mut core::ffi::c_void;
-type LPWSTR = *mut WCHAR;
-type PWSTR = *mut WCHAR;
-type LPCWSTR = *const WCHAR;
-type PCWSTR = *const WCHAR;
-type BOOL = INT;
-type c_ulong = u64;
-type DWORD = c_ulong;
-type HKEY = HANDLE;
-type REGSAM = DWORD;
-type PHKEY = *mut HKEY;
-type LSTATUS = LONG;
-type LPDWORD = *mut DWORD;
-type LPBYTE = *mut BYTE;
-type BYTE = u8;
-type HRESULT = LONG;
+#[cfg(windows)]
+mod winapi;
 
-const KL_NAMELENGTH: usize = 1024;
-const KLF_SETFORPROCESS: UINT = 0x00000100;
-const READ_KEY: DWORD = 0x20019;
-const HKEY_LOCAL_MACHINE: HKEY = 0x80000002 as HKEY; //(( HKEY ) (ULONG_PTR)((LONG)0x80000002) )
-const ERROR_SUCCESS: i64 = 0;
-const BUFFER_LENGTH: usize = 2048;
-// const REG_EXPAND_SZ: DWORD = 0x00000002 as DWORD;
-// const REG_SZ: DWORD = 0x00000001 as DWORD; 
-const RRF_RT_REG_EXPAND_SZ: DWORD = 0x00000004;
-const RRF_RT_REG_SZ: DWORD = 0x00000002;
-const S_OK: HRESULT = 0x00000000;
+mod from_wide;
 
-#[link(name="User32")]
-extern "system" {
-    pub fn GetKeyboardLayoutList(nBuff: INT, lpList: *mut HKL) -> INT;
-    pub fn ActivateKeyboardLayout(hkl: HKL, flags: UINT) -> HKL;
-    pub fn GetKeyboardLayoutNameW(pwszKLID: LPWSTR) -> BOOL;
-    pub fn GetKeyboardLayout(idThread: DWORD) -> HKL;
+unsafe extern "system" fn window_procedure(
+    hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM
+) -> LRESULT {
+    match Msg {
+        WM_CLOSE => drop(DestroyWindow(hWnd)),
+        WM_DESTROY => PostQuitMessage(0),
+        _ => return DefWindowProcW(hWnd, Msg, wParam, lParam),
+    }
+    0
 }
 
-#[link(name="Kernel32")]
-extern "system" {
-    pub fn GetCurrentThreadId() -> DWORD;
+fn main() {
+    let hInstance = unsafe { GetModuleHandleW(null()) };
+    let class_name = widecstr!("Layout Switcher");
+
+    let mut wc = WNDCLASSW::default();
+    wc.lpfnWndProc = Some(window_procedure);
+    wc.hInstance = hInstance;
+    wc.lpszClassName = class_name.as_ptr();
+
+    let atom = unsafe { RegisterClassW(&wc) };
+    if atom == 0 {
+        let last_error = unsafe { GetLastError() };
+        panic!("Could not register the window class, error code: {}", last_error);
+    }
+
+    let window_name = widecstr!("Layout Switcher");
+    let hwnd = unsafe {
+        CreateWindowExW(
+            0,
+            class_name.as_ptr(),
+            window_name.as_ptr(),
+            WS_OVERLAPPEDWINDOW as u64,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            null_mut(),
+            null_mut(),
+            hInstance,
+            null_mut()
+        )
+    };
+
+    if hwnd.is_null() {
+        panic!("Failed to create a window.");
+    }
+
+    let _previously_visible = unsafe { ShowWindow(hwnd, SW_SHOW) };
+
+    let mut msg = MSG::default();
+
+    loop {
+        let message_return = unsafe { GetMessageW(&mut msg, null_mut(), 0, 0) }; 
+        if message_return == 0 {
+            break;
+        } else if message_return == -1 {
+            let last_error = unsafe { GetLastError() };
+            panic!("Error with `GetMessageW`, error code: {}", last_error);
+        } else {
+            unsafe {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    }
 }
 
-#[link(name="Advapi32")]
-extern "system" {
-    pub fn RegOpenKeyExW(hKey: HKEY, plSubKey: LPCWSTR, ulOptions: DWORD, samDesired: REGSAM, phkResult: PHKEY) -> LSTATUS;
-    pub fn RegQueryValueExW(hkey: HKEY, lpValueName: LPCWSTR, lpReserved: LPDWORD, lpType: LPDWORD, lpData: LPBYTE, lpcbData: LPDWORD) -> LSTATUS ;
-
-    pub fn RegGetValueW(hKey: HKEY, lpSubKey: LPCWSTR, lpValue: LPCWSTR, dwFlags: DWORD, pdwType: LPDWORD, pvData: PVOID, pcbData: LPDWORD) -> LSTATUS;
-}
-
-#[link(name="Shlwapi")]
-extern "system" {
-    pub fn SHLoadIndirectString(pszSource: PCWSTR, pszOutBuf: PWSTR, cchOutBuf: UINT, ppvReserved: *const *const core::ffi::c_void) -> HRESULT;
-}
-
-fn WStr_to_String(wstr: &[WCHAR]) -> String {
-    U16CStr::from_slice_truncate(wstr).unwrap().to_string().unwrap()
-}
-
+/*
 fn load_indirect_string(input: &str) -> String {
     let mut output_buf: [WCHAR; BUFFER_LENGTH] = [0; BUFFER_LENGTH];
     let input_buf = U16CString::from_str(input).unwrap();
@@ -89,7 +97,7 @@ fn load_indirect_string(input: &str) -> String {
         panic!("Error RegOpenKeyExW: {result}.");
     }
 
-    WStr_to_String(&output_buf)
+    String::from_wide(&output_buf).unwrap()
 }
 
 fn get_keyboard_layout_info(klid: &str) {
@@ -117,7 +125,14 @@ fn get_keyboard_layout_info(klid: &str) {
     let layout_text = get_string_reg_key(&hKey, "Layout Text");
 
     println!("Layout Display Name: {layout_display_name}.");
-    println!("Layout Text: {layout_text}.");
+    println!("Layout Text: {layout_text}.\n");
+}
+
+fn read_num() -> usize {
+    let mut buf = String::new();
+    std::io::stdin().lock().read_line(&mut buf).unwrap();
+
+    buf.trim().parse().unwrap()
 }
 
 fn get_string_reg_key(hKey: &HKEY, key: &str) -> String {
@@ -143,22 +158,23 @@ fn get_string_reg_key(hKey: &HKEY, key: &str) -> String {
         panic!("Error RegGetValueW: {result}.");
     }
 
-    WStr_to_String(&szBuffer)
+    String::from_wide(&szBuffer).unwrap()
 }
 
 fn main() {
     let mut szKeyboard: [WCHAR; KL_NAMELENGTH] = [0; KL_NAMELENGTH];
-    let current_HKL = unsafe { GetKeyboardLayout(GetCurrentThreadId()) };
+    
     let keyboard_layout_name: String;
+    let current_HKL = unsafe { GetKeyboardLayout(GetCurrentThreadId()) };
     unsafe {
-        ActivateKeyboardLayout(current_HKL, KLF_SETFORPROCESS);
+        ActivateKeyboardLayout(current_HKL, 0);
         GetKeyboardLayoutNameW(szKeyboard.as_mut_ptr());
-        keyboard_layout_name = WStr_to_String(&szKeyboard);
+        keyboard_layout_name = String::from_wide(&szKeyboard).unwrap();
         
         println!("Current layout name: {keyboard_layout_name}.");
     }
-
     get_keyboard_layout_info(&keyboard_layout_name);
+    
 
     let nBuff: INT = unsafe { GetKeyboardLayoutList(0, core::ptr::null_mut()) };
     let mut phkl: Vec<HKL> = Vec::with_capacity(nBuff as usize);
@@ -170,19 +186,32 @@ fn main() {
 
     let phkl = unsafe { Vec::from_raw_parts(ptr, nBuff as usize, nBuff as usize) };
 
-    println!("Layout count: {nBuff}.");
+    println!("Layout count: {nBuff}.\n");
 
-    for klid in phkl {
+    for klid in &phkl {
          unsafe {
-            ActivateKeyboardLayout(klid, KLF_SETFORPROCESS);
+            ActivateKeyboardLayout(*klid, 0);
 
             if GetKeyboardLayoutNameW(szKeyboard.as_mut_ptr()) == 0 {
                 panic!("Error");
             }
         };
-        let keyboard_layout_name = WStr_to_String(&szKeyboard);
-        
+        let keyboard_layout_name = String::from_wide(&szKeyboard).unwrap();
+
         println!("Name: {keyboard_layout_name}.");
-        
+        get_keyboard_layout_info(&keyboard_layout_name);
     }
+
+    let n = read_num();
+    if !(0..nBuff as usize).contains(&n) {
+        panic!("Error");
+    }
+    unsafe {
+        ActivateKeyboardLayout(phkl[n], KLF_REORDER);
+    }
+
+    let mut buf = String::new();
+    std::io::stdin().lock().read_line(&mut buf).unwrap();
+    println!("You wrote: {buf}.");
 }
+*/
