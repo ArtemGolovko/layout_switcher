@@ -2,6 +2,8 @@
 #![allow(non_snake_case)]
 #![windows_subsystem = "windows"]
 
+#![no_main]
+
 use core::ptr::{null, null_mut};
 use widestring::widecstr;
 use winapi::*;
@@ -10,7 +12,6 @@ use winapi::*;
 mod winapi;
 
 mod from_wide;
-
 unsafe extern "system" fn window_procedure(
     hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM
 ) -> LRESULT {
@@ -22,8 +23,13 @@ unsafe extern "system" fn window_procedure(
     0
 }
 
-fn main() {
-    let hInstance = unsafe { GetModuleHandleW(null()) };
+#[no_mangle]
+pub unsafe extern "system" fn wWinMain(
+    hInstance: HINSTANCE,
+    hPrevInstance: HINSTANCE,
+    pCmdLine: PWSTR,
+    nCmdShow: c_int
+) -> c_int {
     let class_name = widecstr!("Layout Switcher");
 
     let mut wc = WNDCLASSW::default();
@@ -77,7 +83,67 @@ fn main() {
             }
         }
     }
+
+    return 0;
 }
+
+
+// fn main() {
+//     let hInstance = unsafe { GetModuleHandleW(null()) };
+//     let class_name = widecstr!("Layout Switcher");
+
+//     let mut wc = WNDCLASSW::default();
+//     wc.lpfnWndProc = Some(window_procedure);
+//     wc.hInstance = hInstance;
+//     wc.lpszClassName = class_name.as_ptr();
+
+//     let atom = unsafe { RegisterClassW(&wc) };
+//     if atom == 0 {
+//         let last_error = unsafe { GetLastError() };
+//         panic!("Could not register the window class, error code: {}", last_error);
+//     }
+
+//     let window_name = widecstr!("Layout Switcher");
+//     let hwnd = unsafe {
+//         CreateWindowExW(
+//             0,
+//             class_name.as_ptr(),
+//             window_name.as_ptr(),
+//             WS_OVERLAPPEDWINDOW as u64,
+//             CW_USEDEFAULT,
+//             CW_USEDEFAULT,
+//             CW_USEDEFAULT,
+//             CW_USEDEFAULT,
+//             null_mut(),
+//             null_mut(),
+//             hInstance,
+//             null_mut()
+//         )
+//     };
+
+//     if hwnd.is_null() {
+//         panic!("Failed to create a window.");
+//     }
+
+//     let _previously_visible = unsafe { ShowWindow(hwnd, SW_SHOW) };
+
+//     let mut msg = MSG::default();
+
+//     loop {
+//         let message_return = unsafe { GetMessageW(&mut msg, null_mut(), 0, 0) }; 
+//         if message_return == 0 {
+//             break;
+//         } else if message_return == -1 {
+//             let last_error = unsafe { GetLastError() };
+//             panic!("Error with `GetMessageW`, error code: {}", last_error);
+//         } else {
+//             unsafe {
+//                 TranslateMessage(&msg);
+//                 DispatchMessageW(&msg);
+//             }
+//         }
+//     }
+// }
 
 /*
 fn load_indirect_string(input: &str) -> String {
@@ -177,6 +243,7 @@ fn main() {
     
 
     let nBuff: INT = unsafe { GetKeyboardLayoutList(0, core::ptr::null_mut()) };
+    // use phkl.set_len instead of core::mem:forget and shadowing
     let mut phkl: Vec<HKL> = Vec::with_capacity(nBuff as usize);
 
     unsafe { GetKeyboardLayoutList(nBuff, phkl.as_mut_ptr()) };
